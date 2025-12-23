@@ -1,0 +1,4 @@
+{
+  "use_full_scan": "true",
+  "batch_size": "10"
+}

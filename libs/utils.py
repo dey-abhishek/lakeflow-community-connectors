@@ -127,6 +127,27 @@ def parse_value(value: Any, field_type: DataType) -> Any:
             elif isinstance(value, datetime):
                 return value
             raise ValueError(f"Cannot convert {value} to timestamp")
+        elif isinstance(field_type, BinaryType):
+            # Handle binary data (e.g., images, files)
+            if isinstance(value, (bytes, bytearray)):
+                # Already in binary format
+                return bytes(value)
+            elif isinstance(value, str):
+                # String representation of binary data (base64 or hex)
+                # Try to decode as base64 first, then hex
+                import base64
+                try:
+                    return base64.b64decode(value)
+                except Exception:
+                    try:
+                        # Try hex decoding
+                        return bytes.fromhex(value.replace(' ', ''))
+                    except Exception:
+                        # If all else fails, encode the string as UTF-8
+                        return value.encode('utf-8')
+            else:
+                # For other types, convert to string then to bytes
+                return str(value).encode('utf-8')
         else:
             # Check for custom UDT handling
             if hasattr(field_type, "fromJson"):

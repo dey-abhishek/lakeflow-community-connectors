@@ -5,8 +5,9 @@ from pyspark.sql.datasource import (
     DataSourceReader,
 )
 from typing import Iterator
-from sources.interface.lakeflow_connect import LakeflowConnect
 
+# NOTE: LakeflowConnect is expected to be defined in the merged file
+# Do NOT import it here - the merge script combines this with the connector code
 
 METADATA_TABLE = "_lakeflow_metadata"
 TABLE_NAME = "tableName"
@@ -19,23 +20,36 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader):
     Currently, only the simpleStreamReader is implemented, which uses a
     more generic protocol suitable for most data sources that support
     incremental loading.
+    
+    Note: Does NOT store the connector instance to avoid serialization issues.
+    The connector is created lazily when needed, as readers may be serialized
+    and sent to Spark workers.
     """
 
     def __init__(
         self,
         options: dict[str, str],
         schema: StructType,
-        lakeflow_connect: LakeflowConnect,
     ):
         self.options = options
-        self.lakeflow_connect = lakeflow_connect
         self.schema = schema
+        # NOTE: Do NOT store lakeflow_connect instance!
+        # Readers get pickled and sent to workers, and the connector
+        # contains non-serializable objects (sessions, locks).
+        self._connector = None
+
+    def _get_connector(self):
+        """Lazy initialization of the connector."""
+        if self._connector is None:
+            self._connector = LakeflowConnect(self.options)
+        return self._connector
 
     def initialOffset(self):
         return {}
 
     def read(self, start: dict) -> (Iterator[tuple], dict):
-        records, offset = self.lakeflow_connect.read_table(
+        connector = self._get_connector()
+        records, offset = connector.read_table(
             self.options["tableName"], start, self.options
         )
         rows = map(lambda x: parse_value(x, self.schema), records)
@@ -51,47 +65,81 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader):
 
 
 class LakeflowBatchReader(DataSourceReader):
+    """
+    Batch reader for Lakeflow Connect.
+    
+    Note: Does NOT store the connector instance to avoid serialization issues.
+    The connector is created lazily when needed, as readers may be serialized
+    and sent to Spark workers.
+    """
+    
     def __init__(
         self,
         options: dict[str, str],
         schema: StructType,
-        lakeflow_connect: LakeflowConnect,
     ):
         self.options = options
         self.schema = schema
-        self.lakeflow_connect = lakeflow_connect
         self.table_name = options[TABLE_NAME]
+        # NOTE: Do NOT store lakeflow_connect instance!
+        # Readers get pickled and sent to workers, and the connector
+        # contains non-serializable objects (sessions, locks).
+        self._connector = None
+
+    def _get_connector(self):
+        """Lazy initialization of the connector."""
+        if self._connector is None:
+            self._connector = LakeflowConnect(self.options)
+        return self._connector
 
     def read(self, partition):
+        connector = self._get_connector()
         all_records = []
         if self.table_name == METADATA_TABLE:
-            all_records = self._read_table_metadata()
+            all_records = self._read_table_metadata(connector)
         else:
-            all_records, _ = self.lakeflow_connect.read_table(
+            all_records, _ = connector.read_table(
                 self.table_name, None, self.options
             )
 
         rows = map(lambda x: parse_value(x, self.schema), all_records)
         return iter(rows)
 
-    def _read_table_metadata(self):
+    def _read_table_metadata(self, connector):
         table_name_list = self.options.get(TABLE_NAME_LIST, "")
         table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
         all_records = []
         for table in table_names:
-            metadata = self.lakeflow_connect.read_table_metadata(table, self.options)
+            metadata = connector.read_table_metadata(table, self.options)
             all_records.append({"tableName": table, **metadata})
         return all_records
 
 
 class LakeflowSource(DataSource):
+    """
+    Lakeflow DataSource implementation with lazy connector initialization.
+    
+    The connector is NOT created in __init__ to avoid serialization issues
+    when Spark registers the DataSource. Instead, it's created lazily when
+    needed in schema() and reader() methods which run on the driver.
+    """
+    
     def __init__(self, options):
         self.options = options
-        self.lakeflow_connect = LakeflowConnect(options)
+        # NOTE: Do NOT create LakeflowConnect here!
+        # It contains non-serializable objects (sessions, locks) that
+        # cause PicklingError when Spark tries to register the DataSource.
+        self._connector = None
 
     @classmethod
     def name(cls):
         return "lakeflow_connect"
+    
+    def _get_connector(self):
+        """Lazy initialization of the connector (runs on driver only)."""
+        if self._connector is None:
+            self._connector = LakeflowConnect(self.options)
+        return self._connector
 
     def schema(self):
         table = self.options["tableName"]
@@ -105,14 +153,17 @@ class LakeflowSource(DataSource):
                 ]
             )
         else:
-            # Assuming the LakeflowConnect interface uses get_table_schema, not get_table_details
-            return self.lakeflow_connect.get_table_schema(table, self.options)
+            # Lazy initialization - creates connector only when needed
+            connector = self._get_connector()
+            return connector.get_table_schema(table, self.options)
 
     def reader(self, schema: StructType):
-        return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
+        # Don't pass connector - let reader create its own to avoid serialization issues
+        return LakeflowBatchReader(self.options, schema)
 
     def simpleStreamReader(self, schema: StructType):
-        return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+        # Don't pass connector - let reader create its own to avoid serialization issues
+        return LakeflowStreamReader(self.options, schema)
 
 
 spark.dataSource.register(LakeflowSource)

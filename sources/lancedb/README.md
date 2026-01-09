@@ -151,12 +151,15 @@ Before using this connector, you need:
 | `api_key` | string | Your LanceDB Cloud API key | `sk_abc123...` |
 | `project_name` | string | Your LanceDB project/database name | `my-project-xyz` |
 | `region` | string | Cloud region where your project is hosted | `us-east-1` |
-| `externalOptionsAllowList` | string | Comma-separated list of table-specific options that can be passed through. **Required** for this connector. | `columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version` |
+| `externalOptionsAllowList` | string | Comma-separated list of table-specific options that can be passed through. **Required** for this connector. | `tableName,tableNameList,tableConfigs,columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version`
+`tableName,tableNameList,tableConfigs,columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version`
 
-> **Note**: Table-specific options such as `columns`, `use_full_scan`, or `filter_expression` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
+> **Note**: 
+> - **Framework options** (`tableName`, `tableNameList`, `tableConfigs`) are automatically passed by the Lakeflow framework and must be included in the allowlist.
+> - **Connector-specific options** (e.g., `columns`, `use_full_scan`, `filter_expression`) are provided per-table via table options in the pipeline specification.
+> - All option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
 ### Configuration Example
 
@@ -165,7 +168,7 @@ The full list of supported table-specific options for `externalOptionsAllowList`
   "api_key": "sk_abc123def456...",
   "project_name": "my-lancedb-project",
   "region": "us-east-1",
-  "externalOptionsAllowList": "columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version"
+  "externalOptionsAllowList": "tableName,tableNameList,tableConfigs,columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version"
 }
 ```
 
